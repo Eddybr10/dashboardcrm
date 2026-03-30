@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
     // Set cookie
     const cookieStore = await cookies();
-    cookieStore.set('cloe_session', 'true', {
+    cookieStore.set('cloe_tienda_session', 'true', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
