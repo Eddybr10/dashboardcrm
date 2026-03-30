@@ -7,11 +7,14 @@ export async function POST(req: NextRequest) {
     const tiendaPassword = process.env.TIENDA_PASSWORD;
 
     if (!password || password !== tiendaPassword) {
-      return NextResponse.json({ error: 'Contraseña de acceso a tiendas incorrecta' }, { status: 401 });
+      return NextResponse.json({ error: 'Contraseña de tiendas incorrecta' }, { status: 401 });
     }
 
-    // Set cookie
     const cookieStore = await cookies();
+    // Limpia la cookie de admin si existe (no mezcles sesiones)
+    cookieStore.delete('cloe_admin_session');
+    cookieStore.delete('cloe_session');
+    // Establece la cookie exclusiva de tienda
     cookieStore.set('cloe_tienda_session', 'true', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',

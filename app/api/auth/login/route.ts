@@ -10,8 +10,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Contraseña incorrecta' }, { status: 401 });
     }
 
-    // Set cookie
     const cookieStore = await cookies();
+    // Limpia la cookie de tienda si existe (no mezcles sesiones)
+    cookieStore.delete('cloe_tienda_session');
+    cookieStore.delete('cloe_session');
+    // Establece la cookie exclusiva de admin
     cookieStore.set('cloe_admin_session', 'true', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
