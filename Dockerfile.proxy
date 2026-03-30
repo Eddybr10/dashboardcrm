@@ -1,0 +1,12 @@
+# Dockerfile para Outbound Proxy
+FROM node:20-slim
+
+WORKDIR /app
+COPY scripts/outbound-proxy.js ./proxy.js
+
+# Instalar dependencias si fueran necesarias (por ahora net es nativo)
+# RUN npm install
+
+EXPOSE 1433
+# Ejemplo: docker run -e TARGET_HOST=mi-sql.azure.com -p 1433:1433 outbound-proxy
+CMD ["node", "proxy.js"]

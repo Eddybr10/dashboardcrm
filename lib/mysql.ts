@@ -2,10 +2,12 @@ import mysql from 'mysql2/promise';
 
 let pool: mysql.Pool | null = null;
 
+const host = process.env.MYSQL_PROXY_HOST || process.env.MYSQL_HOST;
+
 export function getMysqlPool(): mysql.Pool {
   if (!pool) {
     pool = mysql.createPool({
-      host: process.env.MYSQL_HOST,
+      host,
       port: Number(process.env.MYSQL_PORT) || 3306,
       database: process.env.MYSQL_DATABASE,
       user: process.env.MYSQL_USER,
