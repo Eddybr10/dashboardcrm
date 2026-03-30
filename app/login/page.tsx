@@ -13,13 +13,16 @@ function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const isStoreLogin = redirect.startsWith('/tienda');
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const endpoint = isStoreLogin ? '/api/auth/login-tienda' : '/api/auth/login';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
@@ -51,7 +54,7 @@ function LoginForm() {
           </h1>
           <div className="h-[1px] w-8 bg-[#1d1d1f]/10 mx-auto mb-10" />
           <p className="text-[17px] text-[#86868b] font-normal tracking-tight">
-            Gestión Corporativa
+            {isStoreLogin ? 'Portal de Tiendas' : 'Gestión Corporativa'}
           </p>
         </div>
 
@@ -63,7 +66,7 @@ function LoginForm() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Contraseña"
+                placeholder={isStoreLogin ? "Clave de Tienda" : "Contraseña"}
                 className="w-full bg-transparent border-none py-4 text-[21px] text-[#1d1d1f] placeholder:text-[#d2d2d7] outline-none transition-all placeholder:font-normal font-light tracking-widest"
                 required
                 autoFocus
