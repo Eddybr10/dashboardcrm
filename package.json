@@ -6,12 +6,25 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "metrics:run": "node scripts/metricasDi.js",
+    "metrics:auto": "node scripts/scheduler.js"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.95.2",
+    "@types/mssql": "^9.1.11",
+    "axios": "^1.14.0",
+    "date-fns": "^4.1.0",
+    "dotenv": "^17.3.1",
+    "exceljs": "^4.4.0",
+    "lucide-react": "^1.7.0",
+    "mssql": "^12.2.1",
+    "mysql2": "^3.20.0",
     "next": "16.2.1",
+    "node-cron": "^4.2.1",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
