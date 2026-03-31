@@ -14,7 +14,10 @@ import DateRangePicker from '@/components/DateRangePicker';
 export default function FunnelPage() {
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [seconds, setSeconds] = useState(0);
   const [data, setData] = useState<any>(null);
+  const [detailedOrders, setDetailedOrders] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   
   const [inicio, setInicio] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0]; });
@@ -28,16 +31,40 @@ export default function FunnelPage() {
       .catch(console.error);
   }, []);
 
+  const formatTime = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
   async function fetchFunnel() {
     setLoading(true);
+    setProgress(10);
+    setSeconds(0);
+    
+    const progInterval = setInterval(() => {
+      setProgress(p => (p < 90 ? p + Math.random() * 5 : p));
+    }, 400);
+
+    const timerInterval = setInterval(() => {
+      setSeconds(s => s + 1);
+    }, 1000);
+
     try {
       const res = await fetch(`/api/admin/funnel?inicio=${inicio}&fin=${fin}&locationId=${locationId}`);
       const json = await res.json();
       setData(json);
+      setDetailedOrders(json.detailedOrders || []);
+      setProgress(100);
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      clearInterval(progInterval);
+      clearInterval(timerInterval);
+      setTimeout(() => {
+        setLoading(false);
+        setProgress(0);
+      }, 500);
     }
   }
 
@@ -46,7 +73,32 @@ export default function FunnelPage() {
   }, [inicio, fin, locationId]);
 
   const handleExport = () => {
-    window.open(`/api/admin/funnel/export?inicio=${inicio}&fin=${fin}&locationId=${locationId}`, '_blank');
+    if (!detailedOrders.length) return;
+    
+    // Generate CSV locally
+    const headers = ['Folio', 'Fecha', 'Tienda', 'Monto', 'Email Original', 'Email Encontrado', 'Cliente', 'Estado'];
+    const csvContent = [
+      headers.join(','),
+      ...detailedOrders.map(o => [
+        o.folio,
+        o.fecha,
+        `"${o.tienda}"`,
+        o.monto,
+        o.emailOriginal,
+        o.emailEncontrado,
+        `"${o.cliente}"`,
+        o.estado
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Embudo_Detalle_${inicio}_${fin}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const funnelData = data ? [
@@ -63,6 +115,19 @@ export default function FunnelPage() {
 
   return (
     <div style={{ padding: '24px 28px' }}>
+      {/* Progress Bar Container */}
+      {loading && (
+        <div style={{ 
+          position: 'fixed', top: 0, left: 0, right: 0, height: 4, zIndex: 9999,
+          background: 'rgba(255,255,255,0.1)', overflow: 'hidden' 
+        }}>
+          <div style={{ 
+            height: '100%', width: `${progress}%`, background: 'var(--text)', 
+            transition: 'width 0.4s ease-out', boxShadow: '0 0 10px var(--text)' 
+          }} />
+        </div>
+      )}
+
       <header style={{ marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
@@ -73,9 +138,21 @@ export default function FunnelPage() {
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Análisis de retención y registro de clientes en tienda</p>
         </div>
-        <button onClick={handleExport} className="btn" style={{ gap: 8 }}>
-          <Download size={16} /> Exportar Detalle CSV
-        </button>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button 
+            onClick={handleExport} 
+            disabled={loading || !detailedOrders.length}
+            className="btn" 
+            style={{ 
+              gap: 8, 
+              opacity: (loading || !detailedOrders.length) ? 0.5 : 1,
+              cursor: (loading || !detailedOrders.length) ? 'not-allowed' : 'pointer'
+            }}
+          >
+            <Download size={16} /> 
+            {loading ? 'Procesando...' : 'Exportar Detalle CSV'}
+          </button>
+        </div>
       </header>
 
       <section style={{ display: 'flex', gap: 12, marginBottom: 24, alignItems: 'center' }}>
@@ -85,8 +162,9 @@ export default function FunnelPage() {
           <select 
             value={locationId} 
             onChange={e => setLocationId(e.target.value)} 
+            disabled={loading}
             className="crm-input" 
-            style={{ paddingLeft: 34, minWidth: 200 }}
+            style={{ paddingLeft: 34, minWidth: 200, opacity: loading ? 0.6 : 1 }}
           >
             <option value="all">Todas las Tiendas</option>
             {locations.map(l => (
@@ -94,6 +172,18 @@ export default function FunnelPage() {
             ))}
           </select>
         </div>
+        {loading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-muted)', fontSize: 12 }}>
+            <div className="spinner-small" />
+            <span>Consultando Guper...</span>
+            <span style={{ 
+              background: 'var(--bg-secondary)', padding: '2px 8px', borderRadius: 6, 
+              fontFamily: 'monospace', fontWeight: 600, border: '1px solid var(--border)' 
+            }}>
+              {formatTime(seconds)}
+            </span>
+          </div>
+        )}
       </section>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
@@ -108,7 +198,7 @@ export default function FunnelPage() {
             <div className="stat-value">{loading ? '...' : (s.value || 0).toLocaleString()}</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{s.sub}</div>
             <div style={{ 
-              position: 'absolute', right: -10, bottom: -10, opacity: 0.03, transform: 'rotate(-15deg)'
+              position: 'absolute', right: -10, bottom: -10, opacity: 0.1, transform: 'rotate(-15deg)'
             }}>
               <GitBranch size={80} />
             </div>
@@ -125,9 +215,24 @@ export default function FunnelPage() {
             </div>
           </div>
           
-          <div style={{ height: 350, width: '100%' }}>
+          <div style={{ height: 350, width: '100%', position: 'relative' }}>
             {loading ? (
-              <div className="skeleton" style={{ height: '100%', width: '100%' }} />
+              <div style={{ 
+                height: '100%', width: '100%', display: 'flex', flexDirection: 'column', 
+                alignItems: 'center', justifyContent: 'center', gap: 12, background: 'var(--bg-secondary)',
+                borderRadius: 12
+              }}>
+                <div className="spinner" />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>Cargando información...</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Tiempo transcurrido: {formatTime(seconds)}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', opacity: 0.7 }}>
+                    Analizando {detailedOrders.length || 'foliando'} datos de Guper
+                  </span>
+                </div>
+              </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
@@ -221,6 +326,25 @@ export default function FunnelPage() {
         .stat-card:hover {
           transform: translateY(-2px);
           box-shadow: var(--shadow-lg);
+        }
+        .spinner-small {
+          width: 14px;
+          height: 14px;
+          border: 2px solid rgba(0,0,0,0.1);
+          border-top-color: var(--text);
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        }
+        .spinner {
+          width: 32px;
+          height: 32px;
+          border: 3px solid rgba(0,0,0,0.1);
+          border-top-color: var(--text);
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

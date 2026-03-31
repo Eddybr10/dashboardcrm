@@ -1,18 +1,18 @@
 import sql from 'mssql';
 
-const useProxy = !!process.env.AZURE_SQL_PROXY_HOST;
-const server = useProxy ? process.env.AZURE_SQL_PROXY_HOST! : process.env.AZURE_SQL_SERVER!;
+const server = process.env.AZURE_SQL_SERVER!;
+const port = parseInt(process.env.AZURE_SQL_PORT || process.env.DB_PORT || '1433');
 
 const config: sql.config = {
-  server,
-  database: process.env.AZURE_SQL_DATABASE!,
   user: process.env.AZURE_SQL_USER!,
   password: process.env.AZURE_SQL_PASSWORD!,
+  database: process.env.AZURE_SQL_DATABASE!,
+  server,
+  port,
   options: {
     encrypt: true,
-    // Si usamos proxy, a veces necesitamos confiar en el certificado porque 
-    // el nombre del host (proxy) no coincidirá con el del certificado de Azure.
-    trustServerCertificate: useProxy, 
+    // Trust the server certificate because we are connecting through a proxy IP
+    trustServerCertificate: true, 
     enableArithAbort: true,
   },
   pool: {

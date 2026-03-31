@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryAzure } from '@/lib/azure';
 import { queryMysql } from '@/lib/mysql';
+import { getGuperCustomerByEmail } from '@/lib/guper';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -31,47 +32,76 @@ export async function GET(req: NextRequest) {
 
     const orders = await queryAzure<any>(sql, params);
 
-    // 2. Identify missing emails to enrich via Phone
-    const missingEmailOrders = orders.filter((o: any) => !o.email && o.phone);
-    const phonesToLookup = Array.from(new Set(missingEmailOrders.map((o: any) => o.phone.replace(/[^\d]/g, '').slice(-10))));
-
-    // 3. Lookup in MySQL perfiles_registrados by Email OR Phone
-    const emailsToLookup = orders.filter((o: any) => o.email).map((o: any) => o.email);
+    // 2. Identify unique emails and missing emails to enrich
+    const allEmails = Array.from(new Set(orders
+      .map((o: any) => o.email?.trim().toLowerCase())
+      .filter(Boolean) as string[]
+    ));
     
-    // Enriching logic: batch queries
+    // 3. Lookup in MySQL perfiles_registrados
     let profilesByEmail: any[] = [];
-    let profilesByPhone: any[] = [];
-
-    if (emailsToLookup.length > 0) {
+    if (allEmails.length > 0) {
       profilesByEmail = await queryMysql<any>(
         `SELECT firstName, lastName, email, cellphone, rfm_totalPurchases FROM perfiles_registrados WHERE LOWER(email) IN (?)`,
-        [emailsToLookup.map(e => e.toLowerCase())]
+        [allEmails]
       );
     }
 
-    // Attempt phone enrichment
-    if (phonesToLookup.length > 0) {
-      profilesByPhone = await queryMysql<any>(
-        `SELECT firstName, lastName, email, cellphone, rfm_totalPurchases FROM perfiles_registrados WHERE RIGHT(cellphone, 10) IN (?)`,
-        [phonesToLookup]
-      );
+    const emailMap = new Map();
+    profilesByEmail.forEach(p => {
+      emailMap.set(p.email.trim().toLowerCase(), p);
+    });
+
+    // 4. Universal Fallback to Guper API for ALL unique emails (Primary source for status)
+    if (allEmails.length > 0) {
+      const batchSize = 10; // Batching to prevent swamping the API
+      for (let i = 0; i < allEmails.length; i += batchSize) {
+        const batch = allEmails.slice(i, i + batchSize);
+        
+        const guperResults = await Promise.all(
+          batch.map(async (email) => {
+            const profile = await getGuperCustomerByEmail(email.trim());
+            if (profile) {
+              const tags = Array.isArray(profile.tags) ? profile.tags : [];
+              const hasTag119 = tags.some((t: any) => t.tag === 119);
+
+              return {
+                originalQuery: email,
+                email: profile.email,
+                firstName: profile.firstName || profile.name || '',
+                lastName: profile.lastName || '',
+                hasTag119,
+                rfm_totalPurchases: profile.rfm?.totalPurchases || 1,
+                source: 'guper'
+              };
+            }
+            return null;
+          })
+        );
+
+        guperResults.forEach(p => {
+          if (p) {
+            emailMap.set(p.originalQuery.trim().toLowerCase(), p);
+            emailMap.set(p.email.trim().toLowerCase(), p);
+          }
+        });
+      }
     }
 
-    const emailMap = new Map(profilesByEmail.map(p => [p.email.toLowerCase(), p]));
-    const phoneMap = new Map(profilesByPhone.map(p => [(p.cellphone || '').replace(/[^\d]/g, '').slice(-10), p]));
-
-    // 4. Enrich orders and format CSV
+    // 5. Format CSV
     const csvRows = [
       ['Folio', 'Fecha', 'Tienda', 'Monto', 'Email Original', 'Email Encontrado', 'Cliente', 'Estado'],
     ];
 
     orders.forEach((o: any) => {
-      let foundProfile = o.email ? emailMap.get(o.email.toLowerCase()) : null;
+      const emailKey = o.email?.trim().toLowerCase();
+      let foundProfile = emailKey ? emailMap.get(emailKey) : null;
       
-      // Fallback enrichment by phone
-      if (!foundProfile && o.phone) {
-        const cleanPhone = o.phone.replace(/[^\d]/g, '').slice(-10);
-        foundProfile = phoneMap.get(cleanPhone);
+      let estado = 'N/A';
+      if (foundProfile && foundProfile.hasTag119) {
+        estado = foundProfile.rfm_totalPurchases > 1 ? 'RECOMPRA' : 'REGISTRADO';
+      } else if (foundProfile) {
+        estado = '⛔ Sin Registro (No Tag 119)';
       }
 
       csvRows.push([
@@ -81,8 +111,8 @@ export async function GET(req: NextRequest) {
         o.total,
         o.email || '',
         foundProfile ? foundProfile.email : '',
-        foundProfile ? `${foundProfile.firstName} ${foundProfile.lastName}` : 'N/A',
-        foundProfile ? (foundProfile.rfm_totalPurchases > 1 ? 'RECOMPRA' : 'REGISTRADO') : 'N/A'
+        foundProfile ? `${foundProfile.firstName} ${foundProfile.lastName}`.trim() : 'N/A',
+        estado
       ]);
     });
 
