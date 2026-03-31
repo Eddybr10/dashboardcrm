@@ -26,6 +26,7 @@ const dbConfig = {
   user: process.env.AZURE_SQL_USER || process.env.DB_USER,
   password: process.env.AZURE_SQL_PASSWORD || process.env.DB_PASSWORD,
   server: process.env.AZURE_SQL_SERVER || process.env.DB_SERVER,
+  port: parseInt(process.env.AZURE_SQL_PORT || process.env.DB_PORT || '1433'),
   database: process.env.AZURE_SQL_DATABASE || process.env.DB_DATABASE,
   options: {
     encrypt: true,
