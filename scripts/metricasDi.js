@@ -495,6 +495,7 @@ async function main() {
     await insertarDatosMySQL(mysqlConn, "categorizados", resDedup);
     await insertarDatosMySQL(mysqlConn, "registrados", resDedup.filter(r => r.categoria === "Registrados" && clientenetsuiteEsValido(r.clientenetsuite)));
     await insertarDatosMySQL(mysqlConn, "recompras", resDedup.filter(r => r.categoria === "Recompras" && clientenetsuiteEsValido(r.clientenetsuite)));
+    await insertarDatosMySQL(mysqlConn, "tickets_validos", resDedup.filter(r => r.categoria === "Ticket Válido" && clientenetsuiteEsValido(r.clientenetsuite)));
     
     const tiendaArray = generarResumenPorTienda(resDedup, startDate);
     await insertarDatosMySQL(mysqlConn, "conversion_por_tienda", tiendaArray);
