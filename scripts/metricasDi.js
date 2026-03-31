@@ -131,6 +131,9 @@ WHERE CAST(o.external_creation_date AS DATE) = @fecha
   return result.recordset;
 }
 
+// ----------------------------------------------------------------------
+// Función para clasificar y consultar la API de Guper para cada orden
+// ----------------------------------------------------------------------
 async function verificarTagYClasificar(email, folio, fechaEsperada, tienda, clientenetsuite, sellerName) {
   const url = `${BASE_URL}/register/customer?q[email]=${encodeURIComponent(email)}`;
   const zona = categorizarZona(clientenetsuite);
@@ -141,6 +144,7 @@ async function verificarTagYClasificar(email, folio, fechaEsperada, tienda, clie
     const response = await axios.get(url, { headers: HEADERS });
     const data = response.data;
 
+    // SIN CORREO
     if (!email || email.trim() === "") {
       return {
         categoria: "Ticket Válido",
@@ -159,6 +163,7 @@ async function verificarTagYClasificar(email, folio, fechaEsperada, tienda, clie
       };
     }
 
+    // NO ENCONTRADO
     if (!data || !data.list || data.list.length === 0) {
       return {
         categoria: "Ticket Válido",
@@ -185,6 +190,7 @@ async function verificarTagYClasificar(email, folio, fechaEsperada, tienda, clie
     const tag119 = tags.find(t => t.tag === 119);
     const tag207 = tags.find(t => t.tag === 207);
 
+    // EXTRAER FECHAS
     let fechaTag119 = "";
     if (tag119?.createdAt) {
       fechaTag119 = typeof tag119.createdAt === "string"
@@ -206,8 +212,9 @@ async function verificarTagYClasificar(email, folio, fechaEsperada, tienda, clie
         : cliente.createdAt.date?.split(" ")[0] || "";
     }
 
-    const verificado = (fechaTag207 === fechaEsperada);
+    const verificado = (fechaTag207 === fechaEsperada); 
 
+    // CLASIFICACIÓN
     if (fechaTag119 === fechaEsperada && fechaRegistro === fechaEsperada) {
       return {
         categoria: "Registrados",
@@ -257,6 +264,7 @@ async function verificarTagYClasificar(email, folio, fechaEsperada, tienda, clie
         name,
         cellphone,
         staff: sellerName
+
       };
     } else {
       return {
@@ -295,6 +303,9 @@ async function verificarTagYClasificar(email, folio, fechaEsperada, tienda, clie
   }
 }
 
+// ----------------------------------------------------------------------
+// Función para deduplicar por correo
+// ----------------------------------------------------------------------
 function deduplicarPorCorreo(array) {
   const deduplicados = {};
   array.forEach(item => {
@@ -310,6 +321,9 @@ function deduplicarPorCorreo(array) {
   return Object.values(deduplicados);
 }
 
+// ----------------------------------------------------------------------
+// Función para agrupar resultados por tienda y generar el resumen de conversión
+// ----------------------------------------------------------------------
 function generarResumenPorTienda(resultados, fechaBase) {
   const tiendaSummary = {};
   resultados.forEach(r => {
@@ -385,75 +399,317 @@ function generarResumenPorTienda(resultados, fechaBase) {
   return tiendaArray;
 }
 
+// ----------------------------------------------------------------------
+// Función para crear tablas en MySQL (si no existen)
+// ----------------------------------------------------------------------
 async function createTablesMySQL(conn) {
   console.log("🛠  Creando tablas si no existen...");
-  const queries = [
-    `CREATE TABLE IF NOT EXISTS categorizados (id INT AUTO_INCREMENT PRIMARY KEY, categoria VARCHAR(50), folio VARCHAR(50) UNIQUE, email VARCHAR(255), estado VARCHAR(255), fecha VARCHAR(20), fechaBase VARCHAR(20), tienda VARCHAR(255), clientenetsuite VARCHAR(255), zona VARCHAR(50), tipo VARCHAR(50), verificado TINYINT(1) DEFAULT 0)`,
-    `CREATE TABLE IF NOT EXISTS conversion_por_tienda (id INT AUTO_INCREMENT PRIMARY KEY, tienda VARCHAR(255), orders INT, registrados INT, tickets_validos INT, recompras INT, conversion DECIMAL(5,2), tasa_recompras DECIMAL(5,2), verificados INT, porcentaje_verificados DECIMAL(5,2), fechabase DATE, UNIQUE KEY uk_tienda_fecha (tienda, fechabase))`,
-    `CREATE TABLE IF NOT EXISTS orders_netsuite (id INT AUTO_INCREMENT PRIMARY KEY, folio VARCHAR(50) UNIQUE, email VARCHAR(255), created_date DATETIME, tienda VARCHAR(255), clientenetsuite VARCHAR(255))`,
-    `CREATE TABLE IF NOT EXISTS registrados (id INT AUTO_INCREMENT PRIMARY KEY, categoria VARCHAR(50), folio VARCHAR(50) UNIQUE, email VARCHAR(255), estado VARCHAR(255), fecha VARCHAR(20), fechaBase VARCHAR(20), tienda VARCHAR(255), clientenetsuite VARCHAR(255), zona VARCHAR(50), tipo VARCHAR(50), verificado TINYINT(1) DEFAULT 0)`,
-    `CREATE TABLE IF NOT EXISTS recompras (id INT AUTO_INCREMENT PRIMARY KEY, categoria VARCHAR(50), folio VARCHAR(50) UNIQUE, email VARCHAR(255), estado VARCHAR(255), fecha VARCHAR(20), fechaBase VARCHAR(20), tienda VARCHAR(255), clientenetsuite VARCHAR(255), zona VARCHAR(50), tipo VARCHAR(50), verificado TINYINT(1) DEFAULT 0)`,
-    `CREATE TABLE IF NOT EXISTS tickets_validos (id INT AUTO_INCREMENT PRIMARY KEY, categoria VARCHAR(50), folio VARCHAR(50) UNIQUE, email VARCHAR(255), estado VARCHAR(255), fecha VARCHAR(20), fechaBase VARCHAR(20), tienda VARCHAR(255), clientenetsuite VARCHAR(255), zona VARCHAR(50), tipo VARCHAR(50), verificado TINYINT(1) DEFAULT 0)`,
-    `CREATE TABLE IF NOT EXISTS verificados (id INT AUTO_INCREMENT PRIMARY KEY, Nombre VARCHAR(255), Folio VARCHAR(50) UNIQUE, Telefono VARCHAR(50), Email VARCHAR(255), FechaOrden DATE, Tienda VARCHAR(255), Staff VARCHAR(255))`
-  ];
-  for (const q of queries) await conn.query(q);
+  const createCategorizados = `
+    CREATE TABLE IF NOT EXISTS categorizados (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      categoria VARCHAR(50),
+      folio VARCHAR(50) UNIQUE,
+      email VARCHAR(255),
+      estado VARCHAR(255),
+      fecha VARCHAR(20),
+      fechaBase VARCHAR(20),
+      tienda VARCHAR(255),
+      clientenetsuite VARCHAR(255),
+      zona VARCHAR(50),
+      tipo VARCHAR(50),
+      verificado TINYINT(1) DEFAULT 0
+    )
+  `;
+  const createConversion = `
+    CREATE TABLE IF NOT EXISTS conversion_por_tienda (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      tienda VARCHAR(255),
+      orders INT,
+      registrados INT,
+      tickets_validos INT,
+      recompras INT,
+      conversion DECIMAL(5,2),
+      tasa_recompras DECIMAL(5,2),
+      verificados INT,
+      porcentaje_verificados DECIMAL(5,2),
+      fechabase DATE,
+      UNIQUE KEY uk_tienda_fecha (tienda, fechabase)
+    )
+  `;
+  const createOrders = `
+    CREATE TABLE IF NOT EXISTS orders_netsuite (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      folio VARCHAR(50) UNIQUE,
+      email VARCHAR(255),
+      created_date DATETIME,
+      tienda VARCHAR(255),
+      clientenetsuite VARCHAR(255)
+    )
+  `;
+  const createRegistrados = `
+    CREATE TABLE IF NOT EXISTS registrados (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      categoria VARCHAR(50),
+      folio VARCHAR(50) UNIQUE,
+      email VARCHAR(255),
+      estado VARCHAR(255),
+      fecha VARCHAR(20),
+      fechaBase VARCHAR(20),
+      tienda VARCHAR(255),
+      clientenetsuite VARCHAR(255),
+      zona VARCHAR(50),
+      tipo VARCHAR(50),
+      verificado TINYINT(1) DEFAULT 0
+    )
+  `;
+  const createRecompras = `
+    CREATE TABLE IF NOT EXISTS recompras (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      categoria VARCHAR(50),
+      folio VARCHAR(50) UNIQUE,
+      email VARCHAR(255),
+      estado VARCHAR(255),
+      fecha VARCHAR(20),
+      fechaBase VARCHAR(20),
+      tienda VARCHAR(255),
+      clientenetsuite VARCHAR(255),
+      zona VARCHAR(50),
+      tipo VARCHAR(50),
+      verificado TINYINT(1) DEFAULT 0
+    )
+  `;
+  const createTicketsValidos = `
+    CREATE TABLE IF NOT EXISTS tickets_validos (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      categoria VARCHAR(50),
+      folio VARCHAR(50) UNIQUE,
+      email VARCHAR(255),
+      estado VARCHAR(255),
+      fecha VARCHAR(20),
+      fechaBase VARCHAR(20),
+      tienda VARCHAR(255),
+      clientenetsuite VARCHAR(255),
+      zona VARCHAR(50),
+      tipo VARCHAR(50),
+      verificado TINYINT(1) DEFAULT 0
+    )
+  `;
+  const createVerificados = `
+    CREATE TABLE IF NOT EXISTS verificados (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      Nombre VARCHAR(255),
+      Folio VARCHAR(50) UNIQUE,
+      Telefono VARCHAR(50),
+      Email VARCHAR(255),
+      FechaOrden DATE,
+      Tienda VARCHAR(255),
+      Staff VARCHAR(255)
+    )
+  `;
+
+  await conn.query(createCategorizados);
+  await conn.query(createConversion);
+  await conn.query(createOrders);
+  await conn.query(createRegistrados);
+  await conn.query(createRecompras);
+  await conn.query(createTicketsValidos);
+  await conn.query(createVerificados);
   console.log("✅ Tablas en MySQL creadas (si no existían).");
 }
 
+// ----------------------------------------------------------------------
+// Helper: ejecutar INSERT en chunks con logs
+// ----------------------------------------------------------------------
 async function ejecutarInsertEnChunks(conn, query, values, table, chunkSize = 500) {
-  console.log(`🧩 Insertando en '${table}' en chunks. Filas totales: ${values.length}`);
+  console.log(`🧩 Insertando en '${table}' en chunks. Filas totales: ${values.length}, chunkSize: ${chunkSize}`);
   for (let i = 0; i < values.length; i += chunkSize) {
     const chunk = values.slice(i, i + chunkSize);
+    console.log(`➡️  Chunk ${table} [${i} - ${i + chunk.length - 1}] (${chunk.length} filas)`);
     try {
       await conn.query(query, [chunk]);
     } catch (err) {
-      console.error(`❌ Error en chunk de la tabla ${table}:`, err.message);
-      throw err;
+      console.error(`❌ Error en chunk de la tabla ${table}:`, {
+        message: err.message,
+        code: err.code,
+        errno: err.errno,
+        fatal: err.fatal
+      });
+      throw err; 
     }
   }
 }
 
+// ----------------------------------------------------------------------
+// Función para insertar datos en MySQL
+// ----------------------------------------------------------------------
 async function insertarDatosMySQL(conn, table, dataArray) {
-  if (!dataArray.length) return;
+  if (!dataArray.length) {
+    console.log(`ℹ️  Tabla ${table}: no hay datos que insertar.`);
+    return;
+  }
   let query = "";
   let values = [];
 
-  if (["categorizados", "registrados", "recompras", "tickets_validos"].includes(table)) {
-    query = `INSERT INTO ${table} (categoria, folio, email, estado, fecha, fechaBase, tienda, clientenetsuite, zona, tipo, verificado) VALUES ? ON DUPLICATE KEY UPDATE email = VALUES(email), estado = VALUES(estado), fecha = VALUES(fecha), fechaBase = VALUES(fechaBase), tienda = VALUES(tienda), clientenetsuite = VALUES(clientenetsuite), zona = VALUES(zona), tipo = VALUES(tipo), verificado = VALUES(verificado)`;
-    values = dataArray.map(r => [r.categoria, r.folio, r.email, r.estado, r.fecha, r.fechaBase, r.tienda, r.clientenetsuite, r.zona, r.tipo, r.verificado ? 1 : 0]);
+  console.log(`📦 Preparando insert en tabla '${table}' con ${dataArray.length} registros...`);
+
+  if (
+    table === "categorizados" ||
+    table === "registrados" ||
+    table === "recompras" ||
+    table === "tickets_validos"
+  ) {
+    query = `INSERT INTO ${table} 
+  (categoria, folio, email, estado, fecha, fechaBase, tienda, clientenetsuite, zona, tipo, verificado) 
+  VALUES ? 
+  ON DUPLICATE KEY UPDATE 
+    email = VALUES(email),
+    estado = VALUES(estado),
+    fecha = VALUES(fecha),
+    fechaBase = VALUES(fechaBase),
+    tienda = VALUES(tienda),
+    clientenetsuite = VALUES(clientenetsuite),
+    zona = VALUES(zona),
+    tipo = VALUES(tipo),
+    verificado = VALUES(verificado)`;
+
+    values = dataArray.map(r => [
+      r.categoria,
+      r.folio,
+      r.email,
+      r.estado,
+      r.fecha,
+      r.fechaBase,
+      r.tienda,
+      r.clientenetsuite,
+      r.zona,
+      r.tipo,
+      r.verificado ? 1 : 0
+    ]);
+
   } else if (table === "conversion_por_tienda") {
-    query = `INSERT INTO conversion_por_tienda (tienda, orders, registrados, tickets_validos, recompras, conversion, tasa_recompras, fechabase, verificados, porcentaje_verificados) VALUES ? ON DUPLICATE KEY UPDATE orders = VALUES(orders), registrados = VALUES(registrados), tickets_validos = VALUES(tickets_validos), recompras = VALUES(recompras), conversion = VALUES(conversion), tasa_recompras = VALUES(tasa_recompras), verificados = VALUES(verificados), porcentaje_verificados = VALUES(porcentaje_verificados)`;
-    values = dataArray.map(obj => [obj.tienda, obj.orders, obj.registrados, obj.ticketsValidos, obj.recompras, obj.conversion, obj.tasaRecompras, obj.fechabase, obj.verificados, obj.porcentajeVerificados]);
+    query = `INSERT INTO conversion_por_tienda 
+      (tienda, orders, registrados, tickets_validos, recompras, conversion, tasa_recompras, fechabase, verificados, porcentaje_verificados) 
+      VALUES ? 
+      ON DUPLICATE KEY UPDATE 
+        orders = VALUES(orders), 
+        registrados = VALUES(registrados), 
+        tickets_validos = VALUES(tickets_validos), 
+        recompras = VALUES(recompras), 
+        conversion = VALUES(conversion), 
+        tasa_recompras = VALUES(tasa_recompras),
+        verificados = VALUES(verificados),
+        porcentaje_verificados = VALUES(porcentaje_verificados)`;
+
+    values = dataArray.map(obj => [
+      obj.tienda,
+      obj.orders,
+      obj.registrados,
+      obj.ticketsValidos,
+      obj.recompras,
+      obj.conversion,
+      obj.tasaRecompras,
+      obj.fechabase,
+      obj.verificados,
+      obj.porcentajeVerificados
+    ]);
+
   } else if (table === "orders_netsuite") {
-    query = `INSERT INTO orders_netsuite (folio, email, created_date, tienda, clientenetsuite) VALUES ? ON DUPLICATE KEY UPDATE folio = folio`;
-    values = dataArray.map(o => [o.folio, o.email, o.created_date, o.tienda, o.clientenetsuite]);
+    query = `INSERT INTO orders_netsuite 
+      (folio, email, created_date, tienda, clientenetsuite) 
+      VALUES ? 
+      ON DUPLICATE KEY UPDATE folio = folio`;
+
+    values = dataArray.map(o => [
+      o.folio,
+      o.email,
+      o.created_date,
+      o.tienda,
+      o.clientenetsuite
+    ]);
+  } else {
+    console.warn(`⚠️ insertarDatosMySQL llamado con tabla desconocida: ${table}`);
+    return;
   }
+
+  console.log(`📝 Ejemplo de fila para '${table}':`, values[0]);
 
   try {
     await ejecutarInsertEnChunks(conn, query, values, table, 500);
+    console.log(`✅ Datos insertados en la tabla ${table}.`);
   } catch (err) {
-    console.error(`❌ Error al insertar en la tabla ${table}:`, err.message);
+    console.error(`❌ Error al insertar en la tabla ${table} (final):`, {
+      message: err.message,
+      code: err.code,
+      errno: err.errno,
+      fatal: err.fatal
+    });
   }
 }
 
+// ----------------------------------------------------------------------
+// Insert verificados con logs + chunks
+// ----------------------------------------------------------------------
 async function insertarVerificadosLibro(conn, verificadosArray) {
-  if (!verificadosArray.length) return;
-  const query = `INSERT INTO verificados (Nombre, Folio, Telefono, Email, FechaOrden, Tienda, Staff) VALUES ? ON DUPLICATE KEY UPDATE Telefono = VALUES(Telefono), FechaOrden = VALUES(FechaOrden), Tienda = VALUES(Tienda), Staff = VALUES(Staff)`;
-  const values = verificadosArray.map(f => [f.Nombre, f.Folio, f.Telefono, f.Email, f.FechaOrden, f.Tienda, f.Staff]);
-  await ejecutarInsertEnChunks(conn, query, values, "verificados", 500);
+  if (!verificadosArray.length) {
+    console.log("ℹ️  No hay verificados para insertar.");
+    return;
+  }
+
+  console.log(`📚 Preparando insert en 'verificados' con ${verificadosArray.length} filas...`);
+
+  const query = `
+    INSERT INTO verificados (Nombre, Folio, Telefono, Email, FechaOrden, Tienda, Staff)
+    VALUES ?
+    ON DUPLICATE KEY UPDATE 
+      Telefono = VALUES(Telefono),
+      FechaOrden = VALUES(FechaOrden),
+      Tienda = VALUES(Tienda),
+      Staff = VALUES(Staff)
+  `;
+
+  const values = verificadosArray.map(f => [
+    f.Nombre,
+    f.Folio,
+    f.Telefono,
+    f.Email,
+    f.FechaOrden,
+    f.Tienda,
+    f.Staff
+  ]);
+
+  console.log("📝 Ejemplo de fila verificados:", values[0]);
+
+  try {
+    await ejecutarInsertEnChunks(conn, query, values, "verificados", 500);
+    console.log(`✅ Verificados insertados en tabla 'verificados'.`);
+  } catch (err) {
+    console.error("❌ Error al insertar en tabla 'verificados' (final):", {
+      message: err.message,
+      code: err.code,
+      errno: err.errno,
+      fatal: err.fatal
+    });
+  }
 }
 
-function saveResumenCsv(tiendaArray, startDate, baseDir) {
+// ----------------------------------------------------------------------
+// Función para guardar el resumen por tienda en CSV
+// ----------------------------------------------------------------------
+function saveResumenCsv(tiendaArray, startDate) {
   const convHeader = "Tienda,Orders,Registrados,Tickets Válidos,Recompras,Conversion (%),Tasa Recompras (%),Verificados,% Verificados,FechaBase";
-  const convLines = tiendaArray.map(obj => `${obj.tienda},${obj.orders},${obj.registrados},${obj.ticketsValidos},${obj.recompras},${obj.conversion},${obj.tasaRecompras},${obj.verificados},${obj.porcentajeVerificados},${obj.fechabase}`);
-  const outPath = path.join(baseDir, `conversion_por_tienda_${startDate}.csv`);
-  fs.writeFileSync(outPath, [convHeader, ...convLines].join("\n"), "utf-8");
+  const convLines = tiendaArray.map(obj =>
+    `${obj.tienda},${obj.orders},${obj.registrados},${obj.ticketsValidos},${obj.recompras},${obj.conversion},${obj.tasaRecompras},${obj.verificados},${obj.porcentajeVerificados},${obj.fechabase}`
+  );
+  const convPath = path.join(__dirname, `../metrica/conversion_por_tienda_${startDate}.csv`);
+  fs.writeFileSync(convPath, [convHeader, ...convLines].join("\n"), "utf-8");
+  console.log(`\n📊 CSV de conversión por tienda generado: ${convPath}`);
 }
 
+// ----------------------------------------------------------------------
+// MAIN
+// ----------------------------------------------------------------------
 async function main() {
   let inputDate = process.argv[2];
-  
-  // LOGICA DE "AYER" SI NO HAY ARGUMENTO
   if (!inputDate) {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -462,57 +718,152 @@ async function main() {
   }
 
   const startDate = inputDate;
-  const baseMetricaDir = path.join(__dirname, '../metrica');
-  if (!fs.existsSync(baseMetricaDir)) fs.mkdirSync(baseMetricaDir, { recursive: true });
-
-  console.log(`🔍 Iniciando proceso para el ${startDate}...\n`);
+  console.log(`🔍 Obteniendo órdenes del ${startDate}...\n`);
 
   let mysqlConn;
   try {
     mysqlConn = await mysql.createConnection(mysqlConfig);
+    console.log("✅ Conectado a MySQL (fase ORDERS). threadId:", mysqlConn.threadId);
     await createTablesMySQL(mysqlConn);
 
     const orders = await getOrdersByDate(startDate);
-    if (!orders.length) return console.log("⚠️ No hay órdenes para esa fecha.");
+    console.log(`📦 Órdenes obtenidas de SQL Server: ${orders.length}`);
+    if (!orders.length) {
+      console.log("⚠️ No se encontraron órdenes en esa fecha.");
+      return;
+    }
 
+    console.log("➡️ Insertando orders_netsuite en MySQL...");
     await insertarDatosMySQL(mysqlConn, "orders_netsuite", orders);
+
+    const ordersHeader = "Folio,Email,Created_Date,Tienda,clientenetsuite";
+    const ordersLines = orders.map(o => `${o.folio},${o.email},${o.created_date},${o.tienda},${o.clientenetsuite}`);
+    const metricaDir = path.join(__dirname, '../metrica');
+    if (!fs.existsSync(metricaDir)) fs.mkdirSync(metricaDir, { recursive: true });
+    
+    const ordersCsvPath = path.join(metricaDir, `orders_${startDate}.csv`);
+    fs.writeFileSync(ordersCsvPath, [ordersHeader, ...ordersLines].join("\n"), "utf-8");
+    console.log(`\n📄 CSV de órdenes generado: ${ordersCsvPath}`);
+
     await mysqlConn.end();
+    console.log("🔒 Conexión a MySQL cerrada tras orders_netsuite.");
     mysqlConn = null;
 
     const resultados = [];
+    console.log("🔎 Clasificando órdenes y consultando Guper...");
     for (const order of orders) {
-      const result = await verificarTagYClasificar(order.email, order.folio, startDate, order.tienda, order.clientenetsuite, order.seller_name);
+      const result = await verificarTagYClasificar(
+        order.email,
+        order.folio,
+        startDate,
+        order.tienda,
+        order.clientenetsuite,
+        order.seller_name
+      );
       resultados.push(result);
     }
+    console.log(`✅ Clasificación inicial completa. Registros: ${resultados.length}`);
 
-    const resDedup = deduplicarPorCorreo(resultados);
-    const verificados = resDedup.filter(r => r.verificado);
-    const filasLibro = verificados.map(r => ({ Nombre: r.name, Folio: r.folio, Telefono: r.cellphone, Email: r.email, FechaOrden: r.fechaBase, Tienda: r.tienda, Staff: r.staff || r.clientenetsuite }));
+    const resultadosDeduplicados = deduplicarPorCorreo(resultados);
+    console.log(`✅ Deduplicados por correo. Registros: ${resultadosDeduplicados.length}`);
+
+    const verificados = resultadosDeduplicados.filter(r => r.verificado);
+    console.log(`✅ Verificados (tag 207 fecha == ${startDate}): ${verificados.length}`);
+
+    const filasLibro = verificados.map(r => ({
+      Nombre: r.name,
+      Folio: r.folio,
+      Telefono: r.cellphone,
+      Email: r.email,
+      FechaOrden: r.fechaBase,
+      Tienda: r.tienda,
+      Staff: r.staff || r.clientenetsuite
+    }));
+    const header = ["Nombre","Folio","Telefono","Email","FechaOrden","Tienda","Staff"].join(",");
+
+    const lineas = filasLibro.map(f =>
+      [f.Nombre, f.Folio, f.Telefono, f.Email, f.FechaOrden, f.Tienda, f.Staff].join(",")
+    );
+    
+    const verificadosCsvPath = path.join(metricaDir, `verificados_${startDate}.csv`);
+    fs.writeFileSync(verificadosCsvPath, [header, ...lineas].join("\n"), "utf-8");
+    console.log(`✅ CSV de verificados generado: ${verificadosCsvPath}`);
+
+    let registrados = resultadosDeduplicados.filter(r => r.categoria === "Registrados" && clientenetsuiteEsValido(r.clientenetsuite));
+    let recompras = resultadosDeduplicados.filter(r => r.categoria === "Recompras" && clientenetsuiteEsValido(r.clientenetsuite));
+    let ticketsValidos = resultadosDeduplicados.filter(r => r.categoria === "Ticket Válido" && clientenetsuiteEsValido(r.clientenetsuite));
+    const unionTicketsValidos = deduplicarPorCorreo([...ticketsValidos, ...registrados]);
+
+    console.log("\n✅ Clasificación completada:");
+    console.log(`📥 Orders: ${orders.length}`);
+    console.log(`📥 Registrados (deduplicados): ${registrados.length}`);
+    console.log(`🔁 Recompras (deduplicadas): ${recompras.length}`);
+    console.log(`🎫 Tickets Válidos (deduplicados): ${ticketsValidos.length}`);
 
     mysqlConn = await mysql.createConnection(mysqlConfig);
+    console.log("🔁 Conectado a MySQL (fase MÉTRICAS). threadId:", mysqlConn.threadId);
+
+    console.log("➡️ Insertando verificados en MySQL...");
     await insertarVerificadosLibro(mysqlConn, filasLibro);
 
-    await insertarDatosMySQL(mysqlConn, "categorizados", resDedup);
-    await insertarDatosMySQL(mysqlConn, "registrados", resDedup.filter(r => r.categoria === "Registrados" && clientenetsuiteEsValido(r.clientenetsuite)));
-    await insertarDatosMySQL(mysqlConn, "recompras", resDedup.filter(r => r.categoria === "Recompras" && clientenetsuiteEsValido(r.clientenetsuite)));
-    await insertarDatosMySQL(mysqlConn, "tickets_validos", resDedup.filter(r => r.categoria === "Ticket Válido" && clientenetsuiteEsValido(r.clientenetsuite)));
-    
-    const tiendaArray = generarResumenPorTienda(resDedup, startDate);
+    console.log("➡️ Insertando categorizados / registrados / recompras / tickets_validos...");
+    await insertarDatosMySQL(mysqlConn, "categorizados", resultadosDeduplicados);
+    await insertarDatosMySQL(mysqlConn, "registrados", registrados);
+    await insertarDatosMySQL(mysqlConn, "recompras", recompras);
+    await insertarDatosMySQL(mysqlConn, "tickets_validos", unionTicketsValidos);
+
+    console.log("➡️ Generando resumen por tienda...");
+    const tiendaArray = generarResumenPorTienda(resultadosDeduplicados, startDate);
+    console.log(`✅ Resumen por tienda generado. Tiendas: ${tiendaArray.length}`);
+
+    console.log("➡️ Insertando conversion_por_tienda...");
     await insertarDatosMySQL(mysqlConn, "conversion_por_tienda", tiendaArray);
-    saveResumenCsv(tiendaArray, startDate, baseMetricaDir);
+    saveResumenCsv(tiendaArray, startDate);
+
+    const headerRegistrados = "Categoria,Folio,Email,Estado,Fecha,FechaBase,Tienda,clientenetsuite,zona,tipo,Verificado";
+    const ordenar = arr => arr.sort((a, b) => a.tienda.localeCompare(b.tienda) || a.folio.localeCompare(b.folio));
+
+    const saveCsv = (arr, nombre, header) => {
+      const sorted = ordenar(arr);
+      const lines = [header].concat(sorted.map(r => {
+        let base = [
+          r.categoria, r.folio, r.email, r.estado, r.fecha, r.fechaBase,
+          r.tienda, r.clientenetsuite, r.zona, r.tipo, r.verificado ? "Sí" : "No"
+        ];
+        return base.join(",");
+      }));
+      const outPath = path.join(metricaDir, `${nombre}_${startDate}.csv`);
+      fs.writeFileSync(outPath, lines.join("\n"), "utf-8");
+      console.log(`📤 CSV ${nombre} generado: ${outPath}`);
+    };
+
+    saveCsv(registrados, "registrados", headerRegistrados);
+    saveCsv(recompras, "recompras", headerRegistrados);
+    saveCsv(unionTicketsValidos, "tickets_validos", headerRegistrados);
+    saveCsv(resultadosDeduplicados, "categorizados", headerRegistrados);
 
     const workbook = new ExcelJS.Workbook();
     const sheetConv = workbook.addWorksheet('Conversion_Tienda');
-    sheetConv.addRow("Tienda,Orders,Registrados,Tickets Válidos,Recompras,Conversion (%),Tasa Recompras (%),Verificados,% Verificados,FechaBase".split(","));
-    tiendaArray.forEach(o => sheetConv.addRow([o.tienda,o.orders,o.registrados,o.ticketsValidos,o.recompras,o.conversion,o.tasaRecompras,o.verificados,o.porcentajeVerificados,o.fechabase]));
-    const excelPath = path.join(baseMetricaDir, `reporte_metricas_${startDate}.xlsx`);
+    const convHeader = "Tienda,Orders,Registrados,Tickets Válidos,Recompras,Conversion (%),Tasa Recompras (%),Verificados,% Verificados,FechaBase";
+    sheetConv.addRow(convHeader.split(","));
+    tiendaArray.forEach(obj => {
+      sheetConv.addRow([
+        obj.tienda, obj.orders, obj.registrados, obj.ticketsValidos, obj.recompras,
+        obj.conversion, obj.tasaRecompras, obj.verificados, obj.porcentajeVerificados, obj.fechabase
+      ]);
+    });
+
+    const excelPath = path.join(metricaDir, `reporte_metricas_${startDate}.xlsx`);
     await workbook.xlsx.writeFile(excelPath);
-    console.log(`✅ Proceso completado exitosamente para ${startDate}`);
+    console.log(`\n📄 Archivo Excel consolidado generado: ${excelPath}`);
 
   } catch (err) {
-    console.error('❌ Error fatal:', err);
+    console.error('❌ Error al ejecutar MAIN:', err);
   } finally {
-    if (mysqlConn) await mysqlConn.end();
+    if (mysqlConn) {
+      await mysqlConn.end();
+      console.log("🔒 Conexión a MySQL cerrada (finally).");
+    }
   }
 }
 
