@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Download, Calendar, RefreshCcw, Sun, Moon } from 'lucide-react';
 import { useTheme } from '@/lib/theme';
+import DateRangePicker from '@/components/DateRangePicker';
 
 interface TiendaRow {
   tienda: string; orders: number; registrados: number; tickets_validos: number;
@@ -23,22 +24,28 @@ function convClass(n: number) {
 export default function TiendaPage() {
   const router = useRouter();
   const { theme, toggle } = useTheme();
-  const [fecha, setFecha] = useState(getYesterday());
+  
+  const [inicio, setInicio] = useState(() => { 
+    const d = new Date(); d.setDate(d.getDate() - 3); 
+    return d.toISOString().split('T')[0]; 
+  });
+  const [fin, setFin] = useState(() => new Date().toISOString().split('T')[0]);
+
   const [data, setData] = useState<TiendaRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
 
-  async function fetchData(f: string) {
+  async function fetchData(ini: string, fi: string) {
     setLoading(true);
     try {
-      const res = await fetch(`/api/tienda?fecha=${f}`);
+      const res = await fetch(`/api/tienda?inicio=${ini}&fin=${fi}`);
       const json = await res.json();
       setData(json.data || []);
     } catch { setData([]); }
     finally { setLoading(false); }
   }
 
-  useEffect(() => { fetchData(fecha); }, [fecha]);
+  useEffect(() => { fetchData(inicio, fin); }, [inicio, fin]);
 
   const filtered = useMemo(() =>
     data.filter(r => r.tienda.toLowerCase().includes(search.toLowerCase())),
@@ -46,7 +53,7 @@ export default function TiendaPage() {
 
   const totals = useMemo(() => ({
     tickets: filtered.reduce((a, r) => a + Number(r.orders), 0),
-    registros: filtered.reduce((a, r) => a + Number(r.registrados), 0),
+    registrados: filtered.reduce((a, r) => a + Number(r.registrados), 0),
     validos: filtered.reduce((a, r) => a + Number(r.tickets_validos), 0),
     recompras: filtered.reduce((a, r) => a + Number(r.recompras), 0),
   }), [filtered]);
@@ -54,11 +61,11 @@ export default function TiendaPage() {
   function exportCSV() {
     const h = 'Ubicación,Tickets,Registros,Tickets Válidos,Recompras,Conversión,Tasa Recompra';
     const rows = filtered.map(r =>
-      `"${r.tienda}",${r.orders},${r.registrados},${r.tickets_validos},${r.recompras},${r.conversion}%,${r.tasa_recompras}%`
+      `"${r.tienda}",${r.orders},${r.registrados},${r.tickets_validos},${r.recompras},${parseFloat(r.conversion).toFixed(1)}%,${parseFloat(r.tasa_recompras).toFixed(1)}%`
     );
     const blob = new Blob([h + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = `cloe-tiendas-${fecha}.csv`; a.click();
+    a.download = `cloe-tiendas-${inicio}-to-${fin}.csv`; a.click();
   }
 
   return (
@@ -84,10 +91,7 @@ export default function TiendaPage() {
       <div style={{ padding: '24px 28px', maxWidth: 1200, margin: '0 auto' }}>
         {/* Controls */}
         <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Calendar size={14} color="var(--text-muted)" />
-            <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} className="crm-input" />
-          </div>
+          <DateRangePicker inicio={inicio} fin={fin} onChange={(i: string, f: string) => { setInicio(i); setFin(f); }} />
           <div style={{ flex: 1, maxWidth: 300, position: 'relative' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input type="text" placeholder="Buscar tienda..." value={search}
@@ -100,7 +104,7 @@ export default function TiendaPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
           {[
             { label: 'Tickets', value: totals.tickets },
-            { label: 'Registros', value: totals.registros },
+            { label: 'Registros', value: totals.registrados },
             { label: 'Válidos', value: totals.validos },
             { label: 'Recompras', value: totals.recompras },
           ].map(s => (
@@ -138,7 +142,7 @@ export default function TiendaPage() {
                 </thead>
                 <tbody>
                   {filtered.map(row => (
-                    <tr key={row.tienda} onClick={() => router.push(`/tienda/${encodeURIComponent(row.tienda)}?fecha=${fecha}`)}
+                    <tr key={row.tienda} onClick={() => router.push(`/tienda/${encodeURIComponent(row.tienda)}?inicio=${inicio}&fin=${fin}`)}
                       style={{ cursor: 'pointer' }}>
                       <td style={{ fontWeight: 500, color: 'var(--text)' }}>{row.tienda}</td>
                       <td style={{ textAlign: 'right', fontWeight: 500 }}>{row.orders}</td>
@@ -161,7 +165,7 @@ export default function TiendaPage() {
           )}
         </div>
         <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: 11 }}>
-          {filtered.length} tiendas · {fecha}
+          {filtered.length} tiendas · {inicio} a {fin}
         </div>
       </div>
     </div>
