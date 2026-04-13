@@ -24,13 +24,19 @@ export default function DateRangePicker({ inicio, fin, onChange }: DateRangePick
     }
   };
 
-  const setPreset = (preset: '7d' | '30d' | 'esteMes' | 'mesPasado') => {
+  const setPreset = (preset: '3d' | '7d' | '15d' | '30d' | 'esteMes' | 'mesPasado') => {
     const d = new Date();
     let end = new Date().toISOString().split('T')[0];
     let start = '';
 
-    if (preset === '7d') {
+    if (preset === '3d') {
+      const s = new Date(); s.setDate(s.getDate() - 3);
+      start = s.toISOString().split('T')[0];
+    } else if (preset === '7d') {
       const s = new Date(); s.setDate(s.getDate() - 7);
+      start = s.toISOString().split('T')[0];
+    } else if (preset === '15d') {
+      const s = new Date(); s.setDate(s.getDate() - 15);
       start = s.toISOString().split('T')[0];
     } else if (preset === '30d') {
       const s = new Date(); s.setDate(s.getDate() - 30);
@@ -51,10 +57,11 @@ export default function DateRangePicker({ inicio, fin, onChange }: DateRangePick
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', background: 'var(--bg-card)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', gap: 4 }}>
+        <button onClick={() => setPreset('3d')} className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>3d</button>
         <button onClick={() => setPreset('7d')} className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>7d</button>
+        <button onClick={() => setPreset('15d')} className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>15d</button>
         <button onClick={() => setPreset('30d')} className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>30d</button>
         <button onClick={() => setPreset('esteMes')} className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>Este Mes</button>
-        <button onClick={() => setPreset('mesPasado')} className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>Mes Pasado</button>
       </div>
       
       <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
