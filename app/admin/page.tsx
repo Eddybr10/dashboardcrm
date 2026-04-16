@@ -39,11 +39,12 @@ export default function AdminPage() {
     (a, r) => ({ 
       t: a.t + Number(r.tickets || 0), 
       reg: a.reg + Number(r.registrados || 0), 
-      rec: a.rec + Number(r.recompras || 0) 
+      rec: a.rec + Number(r.recompras || 0),
+      tv: a.tv + Number(r.tickets_validos || 0)
     }),
-    { t: 0, reg: 0, rec: 0 }
+    { t: 0, reg: 0, rec: 0, tv: 0 }
   );
-  const conv = totals.t ? Math.round((totals.reg / totals.t) * 100) : 0;
+  const conv = totals.tv ? Math.round((totals.reg / totals.tv) * 100) : 0;
   const axisColor = theme === 'dark' ? '#555' : '#bbb';
 
   return (

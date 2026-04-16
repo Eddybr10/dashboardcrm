@@ -68,8 +68,9 @@ export async function GET(req: NextRequest, { params: paramsPromise }: { params:
     const totalVenta = enrichedOrders.reduce((sum, o) => sum + Number(o.venta_importe || 0), 0);
     const totalOrdenes = enrichedOrders.length;
     const totalRegistrados = enrichedOrders.filter(o => o.registro === 'Registrado').length;
+    const totalValidos = enrichedOrders.filter(o => o.email && o.email.includes('@')).length;
     const ticketPromedio = totalOrdenes > 0 ? totalVenta / totalOrdenes : 0;
-    const tasaConversion = totalOrdenes > 0 ? (totalRegistrados / totalOrdenes) * 100 : 0;
+    const tasaConversion = totalValidos > 0 ? (totalRegistrados / totalValidos) * 100 : 0;
 
     return NextResponse.json({
       seller: {

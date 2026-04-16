@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
                SUM(tickets_validos) as tickets_validos, 
                SUM(recompras) as recompras,
                SUM(verificados) as verificados,
-               (SUM(registrados) / NULLIF(SUM(orders), 0)) * 100 as conversion,
+               (SUM(registrados) / NULLIF(SUM(tickets_validos), 0)) * 100 as conversion,
                (SUM(recompras) / NULLIF(SUM(registrados), 0)) * 100 as tasa_recompras,
                (SUM(verificados) / NULLIF(SUM(registrados), 0)) * 100 as porcentaje_verificados
         FROM conversion_por_tienda

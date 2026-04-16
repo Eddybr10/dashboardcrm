@@ -227,7 +227,7 @@ export default function TiendaDetalle({ params: paramsPromise }: { params: Promi
                     {conv >= 90 ? 'EXCELENTE' : conv >= 60 ? 'REGULAR' : 'CRÍTICO'}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-                    Basado en {Number(resumen?.orders || 0).toLocaleString()} tickets totales en este rango.
+                    Basado en {Number(resumen?.tickets_validos || 0).toLocaleString()} tickets válidos en este rango.
                   </div>
                 </div>
               </div>

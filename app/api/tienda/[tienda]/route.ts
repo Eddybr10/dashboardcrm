@@ -47,7 +47,7 @@ export async function GET(
            SUM(registrados) as registrados, 
            SUM(tickets_validos) as tickets_validos, 
            SUM(recompras) as recompras,
-           (SUM(registrados) / NULLIF(SUM(orders), 0)) * 100 as conversion,
+           (SUM(registrados) / NULLIF(SUM(tickets_validos), 0)) * 100 as conversion,
            (SUM(recompras) / NULLIF(SUM(registrados), 0)) * 100 as tasa_recompras
          FROM conversion_por_tienda WHERE tienda = ? AND DATE(fechabase) BETWEEN ? AND ?`,
         [nombreTienda, start, end]
