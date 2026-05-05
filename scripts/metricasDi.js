@@ -16,17 +16,16 @@ const path = require('path');
 const ExcelJS = require('exceljs');
 const mysql = require('mysql2/promise');
 
-dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 // ----------------------------------------------------------------------
 // Configuración de conexión a SQL Server
 // ----------------------------------------------------------------------
 const dbConfig = {
-  user: process.env.DB_USER || process.env.AZURE_SQL_USER,
-  password: process.env.DB_PASSWORD || process.env.AZURE_SQL_PASSWORD,
-  server: process.env.DB_SERVER || process.env.AZURE_SQL_SERVER,
-  port: parseInt(process.env.DB_PORT || process.env.AZURE_SQL_PORT || '1433'),
-  database: process.env.DB_DATABASE || process.env.AZURE_SQL_DATABASE,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  server: process.env.DB_SERVER,
+  database: process.env.DB_DATABASE,
   options: {
     encrypt: true,
     trustServerCertificate: true
@@ -37,17 +36,16 @@ const dbConfig = {
 // Configuración de conexión a MySQL
 // ----------------------------------------------------------------------
 const mysqlConfig = {
-  host: process.env.MYSQL_PROXY_HOST || process.env.MYSQL_HOST,
-  port: Number(process.env.MYSQL_PORT) || 3306,
-  user: process.env.MYSQL_USER,
-  password: process.env.MYSQL_PASSWORD,
-  database: process.env.MYSQL_DATABASE
+  host: "69.6.202.82",
+  user: "cloemedi_user",
+  password: "UnaPassSegura123!-",//NuevaPassMegaSegura2025$!
+  database: "cloemedi_formularios"
 };
 
 // ----------------------------------------------------------------------
 // === Guper API CONFIG ===
-const BASE_URL = process.env.GUPER_BASE_URL || "https://cloe.myguper.com/api";
-const TOKEN = process.env.GUPER_TOKEN || "3d0131453cee9a7e540dbcd78eb9c8daf31761270b96c3f3d1405a898dda759a";
+const BASE_URL = "https://cloe.myguper.com/api";
+const TOKEN = "3d0131453cee9a7e540dbcd78eb9c8daf31761270b96c3f3d1405a898dda759a";
 const HEADERS = {
   "x-guper-authorization": `Bearer ${TOKEN}`,
   "Content-Type": "application/json"
@@ -713,7 +711,8 @@ async function ejecutarInsertEnChunks(conn, query, values, table, chunkSize = 50
         errno: err.errno,
         fatal: err.fatal
       });
-      throw err; 
+      // No re-lanzamos para ver qué pasa con el resto, pero lo logueamos bien
+      throw err; // aquí SÍ paramos, para no seguir con conexión posiblemente rota
     }
   }
 }
@@ -813,6 +812,7 @@ async function insertarDatosMySQL(conn, table, dataArray) {
   console.log(`📝 Ejemplo de fila para '${table}':`, values[0]);
 
   try {
+    // Usamos chunks para no matar al servidor
     await ejecutarInsertEnChunks(conn, query, values, table, 500);
     console.log(`✅ Datos insertados en la tabla ${table}.`);
   } catch (err) {
@@ -879,11 +879,37 @@ function saveResumenCsv(tiendaArray, startDate) {
   const convLines = tiendaArray.map(obj =>
     `${obj.tienda},${obj.orders},${obj.registrados},${obj.ticketsValidos},${obj.recompras},${obj.conversion},${obj.tasaRecompras},${obj.verificados},${obj.porcentajeVerificados},${obj.fechabase}`
   );
-  const convPath = path.join(__dirname, `../metrica/conversion_por_tienda_${startDate}.csv`);
+  const convPath = path.join(__dirname, `/metrica/conversion_por_tienda_${startDate}.csv`);
   fs.writeFileSync(convPath, [convHeader, ...convLines].join("\n"), "utf-8");
   console.log(`\n📊 CSV de conversión por tienda generado: ${convPath}`);
 }
 
+// ----------------------------------------------------------------------
+// Función para guardar datos en Excel consolidado con ExcelJS
+// ----------------------------------------------------------------------
+async function guardarExcel(startDate, sheetsData) {
+  const workbook = new ExcelJS.Workbook();
+  
+  function agregarHoja(sheetName, header, data) {
+    const worksheet = workbook.addWorksheet(sheetName);
+    worksheet.addRow(header.split(","));
+    data.forEach(row => {
+      worksheet.addRow(row.split(","));
+    });
+  }
+  
+  for (const sheet of sheetsData) {
+    agregarHoja(sheet.sheetName, sheet.header, sheet.data);
+  }
+  
+  const excelPath = path.join(__dirname, `/metrica/reporte_metricas_${startDate}.xlsx`);
+  await workbook.xlsx.writeFile(excelPath);
+  console.log(`\n📄 Archivo Excel consolidado generado: ${excelPath}`);
+}
+
+// ----------------------------------------------------------------------
+// MAIN
+// ----------------------------------------------------------------------
 // ----------------------------------------------------------------------
 // MAIN
 // ----------------------------------------------------------------------
@@ -913,7 +939,7 @@ async function main() {
 
     const ordersHeader = "Folio,Email,Created_Date,Tienda,clientenetsuite";
     const ordersLines = orders.map(o => `${o.folio},${o.email},${o.created_date},${o.tienda},${o.clientenetsuite}`);
-    const ordersCsvPath = path.join(__dirname, `../metrica/orders_${startDate}.csv`);
+    const ordersCsvPath = path.join(__dirname, `/metrica/orders_${startDate}.csv`);
     fs.writeFileSync(ordersCsvPath, [ordersHeader, ...ordersLines].join("\n"), "utf-8");
     console.log(`\n📄 CSV de órdenes generado: ${ordersCsvPath}`);
 
@@ -959,7 +985,7 @@ async function main() {
       [f.Nombre, f.Folio, f.Telefono, f.Email, f.FechaOrden, f.Tienda, f.Staff].join(",")
     );
     
-    const verificadosCsvPath = path.join(__dirname, `../metrica/verificados_${startDate}.csv`);
+    const verificadosCsvPath = path.join(__dirname, `/metrica/verificados_${startDate}.csv`);
     fs.writeFileSync(verificadosCsvPath, [header, ...lineas].join("\n"), "utf-8");
     console.log(`✅ CSV de verificados generado: ${verificadosCsvPath}`);
 
@@ -1009,7 +1035,7 @@ async function main() {
         if (headerCols === 11) base.push(r.verificado ? "Sí" : "No");
         return base.join(",");
       }));
-      const outPath = path.join(__dirname, `../metrica/${nombre}_${startDate}.csv`);
+      const outPath = path.join(__dirname, `/metrica/${nombre}_${startDate}.csv`);
       fs.writeFileSync(outPath, lines.join("\n"), "utf-8");
       console.log(`📤 CSV ${nombre} generado: ${outPath}`);
     };
@@ -1073,7 +1099,7 @@ async function main() {
       sheetTrans.addRow([o.folio, o.email, o.created_date, o.tienda, o.clientenetsuite]);
     });
 
-    const excelPath = path.join(__dirname, `../metrica/reporte_metricas_${startDate}.xlsx`);
+    const excelPath = path.join(__dirname, `/metrica/reporte_metricas_${startDate}.xlsx`);
     await workbook.xlsx.writeFile(excelPath);
     console.log(`\n📄 Archivo Excel consolidado generado: ${excelPath}`);
 
@@ -1088,3 +1114,5 @@ async function main() {
 }
 
 main();
+
+
