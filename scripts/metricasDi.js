@@ -16,18 +16,17 @@ const path = require('path');
 const ExcelJS = require('exceljs');
 const mysql = require('mysql2/promise');
 
-// Cargar variables de entorno del archivo .env.local de la raíz
-dotenv.config({ path: path.join(__dirname, '../.env.local') });
+dotenv.config({ path: '.env.local' });
 
 // ----------------------------------------------------------------------
 // Configuración de conexión a SQL Server
 // ----------------------------------------------------------------------
 const dbConfig = {
-  user: process.env.AZURE_SQL_USER || process.env.DB_USER,
-  password: process.env.AZURE_SQL_PASSWORD || process.env.DB_PASSWORD,
-  server: process.env.AZURE_SQL_SERVER || process.env.DB_SERVER,
-  port: parseInt(process.env.AZURE_SQL_PORT || process.env.DB_PORT || '1433'),
-  database: process.env.AZURE_SQL_DATABASE || process.env.DB_DATABASE,
+  user: process.env.DB_USER || process.env.AZURE_SQL_USER,
+  password: process.env.DB_PASSWORD || process.env.AZURE_SQL_PASSWORD,
+  server: process.env.DB_SERVER || process.env.AZURE_SQL_SERVER,
+  port: parseInt(process.env.DB_PORT || process.env.AZURE_SQL_PORT || '1433'),
+  database: process.env.DB_DATABASE || process.env.AZURE_SQL_DATABASE,
   options: {
     encrypt: true,
     trustServerCertificate: true
@@ -38,10 +37,11 @@ const dbConfig = {
 // Configuración de conexión a MySQL
 // ----------------------------------------------------------------------
 const mysqlConfig = {
-  host: process.env.MYSQL_HOST || "69.6.202.82",
-  user: process.env.MYSQL_USER || "cloemedi_user",
-  password: process.env.MYSQL_PASSWORD || "UnaPassSegura123!-",
-  database: process.env.MYSQL_DATABASE || "cloemedi_formularios"
+  host: process.env.MYSQL_PROXY_HOST || process.env.MYSQL_HOST,
+  port: Number(process.env.MYSQL_PORT) || 3306,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DATABASE
 };
 
 // ----------------------------------------------------------------------
@@ -134,150 +134,339 @@ WHERE CAST(o.external_creation_date AS DATE) = @fecha
 // ----------------------------------------------------------------------
 // Función para clasificar y consultar la API de Guper para cada orden
 // ----------------------------------------------------------------------
+// ----------------------------------------------------------------------
+// === Guper helpers: getList por email + detalle por /customer/:person ===
+// ----------------------------------------------------------------------
+
+const TAG_COMPLETO = "119";       // Completo
+const TAG_PIN_VALIDATED = "207";  // PIN Validated
+
+const guperListCache = new Map();
+const guperDetailCache = new Map();
+
+function normalizarFechaGuper(valor) {
+  if (!valor) return "";
+
+  if (typeof valor === "string") {
+    return valor.includes("T")
+      ? valor.split("T")[0]
+      : valor.split(" ")[0];
+  }
+
+  if (valor.date) {
+    return String(valor.date).includes("T")
+      ? String(valor.date).split("T")[0]
+      : String(valor.date).split(" ")[0];
+  }
+
+  return "";
+}
+
+function obtenerTags(cliente) {
+  return Array.isArray(cliente?.tags) ? cliente.tags : [];
+}
+
+function obtenerTagId(tag) {
+  return String(tag?.tag ?? tag?.id ?? tag?.tagId ?? "").trim();
+}
+
+function buscarTag(cliente, tagId) {
+  const idBuscado = String(tagId).trim();
+  return obtenerTags(cliente).find(t => obtenerTagId(t) === idBuscado);
+}
+
+function tieneTag(cliente, tagId) {
+  return Boolean(buscarTag(cliente, tagId));
+}
+
+function totalCompras(cliente) {
+  return Number(cliente?.rfm?.totalPurchases ?? 0);
+}
+
+function valorTotalCompras(cliente) {
+  return Number(cliente?.rfm?.totalPurchaseValue ?? 0);
+}
+
+function fechaTimestamp(valor) {
+  const fecha = normalizarFechaGuper(valor);
+  const ts = Date.parse(fecha);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function normalizarClienteDetalle(payload) {
+  if (!payload) return null;
+
+  // Por si Guper cambia/usa alguna envoltura.
+  if (payload.id) return payload;
+  if (payload.data?.id) return payload.data;
+  if (payload.customer?.id) return payload.customer;
+  if (payload.person?.id) return payload.person;
+
+  return null;
+}
+
+async function buscarClientesGuperPorEmail(email) {
+  const emailKey = String(email || "").trim().toLowerCase();
+
+  if (guperListCache.has(emailKey)) {
+    return guperListCache.get(emailKey);
+  }
+
+  const url = `${BASE_URL}/register/customer?q[email]=${encodeURIComponent(emailKey)}`;
+
+  const response = await axios.get(url, { headers: HEADERS });
+  const data = response.data;
+
+  let lista = [];
+
+  if (Array.isArray(data?.list)) {
+    lista = data.list;
+  } else if (Array.isArray(data)) {
+    lista = data;
+  }
+
+  guperListCache.set(emailKey, lista);
+  return lista;
+}
+
+async function obtenerClienteGuperPorId(personId) {
+  const idKey = String(personId || "").trim();
+
+  if (!idKey) return null;
+
+  if (guperDetailCache.has(idKey)) {
+    return guperDetailCache.get(idKey);
+  }
+
+  const url = `${BASE_URL}/register/customer/${encodeURIComponent(idKey)}`;
+
+  const response = await axios.get(url, { headers: HEADERS });
+  const cliente = normalizarClienteDetalle(response.data);
+
+  guperDetailCache.set(idKey, cliente);
+  return cliente;
+}
+
+function scoreClienteGuper(cliente, fechaEsperada) {
+  const tag119 = buscarTag(cliente, TAG_COMPLETO);
+  const tag207 = buscarTag(cliente, TAG_PIN_VALIDATED);
+
+  const fechaTag119 = normalizarFechaGuper(tag119?.createdAt);
+  const fechaTag207 = normalizarFechaGuper(tag207?.createdAt);
+
+  const compras = totalCompras(cliente);
+  const valorCompras = valorTotalCompras(cliente);
+
+  let score = 0;
+
+  // Prioridad principal: cliente completo.
+  if (tag119) score += 1000;
+
+  // Luego prioridad a clientes con compras reales.
+  if (compras > 0) score += 600;
+
+  // Si el tag 119 fue creado justo en la fecha del reporte, debe ganar.
+  if (fechaTag119 === fechaEsperada) score += 400;
+
+  // PIN Validated ayuda a identificar el registro correcto.
+  if (tag207) score += 200;
+  if (fechaTag207 === fechaEsperada) score += 300;
+
+  // Validado en Guper.
+  if (cliente?.validatedAt) score += 100;
+
+  // Desempate por volumen de compras, sin dejar que domine todo.
+  score += Math.min(compras, 100);
+  score += Math.min(Math.floor(valorCompras / 10000), 100);
+
+  return {
+    score,
+    ultimaCompraTs: fechaTimestamp(cliente?.rfm?.lastPurchaseDate),
+    updatedAtTs: fechaTimestamp(cliente?.updatedAt),
+    createdAtTs: fechaTimestamp(cliente?.createdAt),
+    id: Number(cliente?.id || 0)
+  };
+}
+
+function seleccionarMejorClienteGuper(clientesDetalle, fechaEsperada) {
+  if (!Array.isArray(clientesDetalle) || clientesDetalle.length === 0) {
+    return null;
+  }
+
+  const ordenados = [...clientesDetalle].sort((a, b) => {
+    const sa = scoreClienteGuper(a, fechaEsperada);
+    const sb = scoreClienteGuper(b, fechaEsperada);
+
+    if (sb.score !== sa.score) return sb.score - sa.score;
+    if (sb.ultimaCompraTs !== sa.ultimaCompraTs) return sb.ultimaCompraTs - sa.ultimaCompraTs;
+    if (sb.updatedAtTs !== sa.updatedAtTs) return sb.updatedAtTs - sa.updatedAtTs;
+    if (sb.createdAtTs !== sa.createdAtTs) return sb.createdAtTs - sa.createdAtTs;
+
+    return sb.id - sa.id;
+  });
+
+  return ordenados[0];
+}
+
+async function obtenerClienteCorrectoPorEmail(email, fechaEsperada) {
+  const candidatos = await buscarClientesGuperPorEmail(email);
+
+  if (!candidatos.length) {
+    return {
+      cliente: null,
+      totalCandidatos: 0,
+      detallesConsultados: 0,
+      erroresDetalle: []
+    };
+  }
+
+  const detalles = [];
+  const erroresDetalle = [];
+
+  for (const candidato of candidatos) {
+    const personId = candidato?.id;
+
+    if (!personId) continue;
+
+    try {
+      const detalle = await obtenerClienteGuperPorId(personId);
+
+      if (detalle) {
+        detalles.push(detalle);
+      } else {
+        // Fallback por si el detalle viene vacío pero el candidato trae algo útil.
+        detalles.push(candidato);
+      }
+    } catch (err) {
+      erroresDetalle.push(`${personId}: ${err.message}`);
+
+      // Fallback: si getList algún día vuelve a traer tags/rfm, no perdemos esa info.
+      if (Array.isArray(candidato?.tags) || candidato?.rfm) {
+        detalles.push(candidato);
+      }
+    }
+  }
+
+  const cliente = seleccionarMejorClienteGuper(detalles, fechaEsperada);
+
+  return {
+    cliente,
+    totalCandidatos: candidatos.length,
+    detallesConsultados: detalles.length,
+    erroresDetalle
+  };
+}
+
+// ----------------------------------------------------------------------
+// Función para clasificar y consultar la API de Guper para cada orden
+// ----------------------------------------------------------------------
 async function verificarTagYClasificar(email, folio, fechaEsperada, tienda, clientenetsuite, sellerName) {
-  const url = `${BASE_URL}/register/customer?q[email]=${encodeURIComponent(email)}`;
   const zona = categorizarZona(clientenetsuite);
   const tipo = categorizarTipo(clientenetsuite);
   const fechaBase = fechaEsperada;
 
-  try {
-    const response = await axios.get(url, { headers: HEADERS });
-    const data = response.data;
+  const baseResultado = {
+    folio,
+    email: email || "",
+    fechaBase,
+    tienda,
+    clientenetsuite,
+    zona,
+    tipo,
+    staff: sellerName,
+    verificado: false,
+    name: "",
+    cellphone: ""
+  };
 
-    // SIN CORREO
-    if (!email || email.trim() === "") {
-      return {
-        categoria: "Ticket Válido",
-        folio,
-        email: "",
-        estado: "🎫 Sin correo (válido por tienda)",
-        fecha: "",
-        fechaBase,
-        tienda,
-        clientenetsuite,
-        zona,
-        tipo,
-        verificado: false,
-        name: "",
-        cellphone: ""
-      };
-    }
+  // ✅ VALIDAR EMAIL ANTES DE IR A GUPER
+  if (!email || email.trim() === "") {
+    return {
+      ...baseResultado,
+      categoria: "Ticket Válido",
+      estado: "🎫 Sin correo (válido por tienda)",
+      fecha: ""
+    };
+  }
+
+  try {
+    const {
+      cliente,
+      totalCandidatos,
+      detallesConsultados,
+      erroresDetalle
+    } = await obtenerClienteCorrectoPorEmail(email, fechaEsperada);
 
     // NO ENCONTRADO
-    if (!data || !data.list || data.list.length === 0) {
+    if (!cliente) {
       return {
+        ...baseResultado,
         categoria: "Ticket Válido",
-        folio,
-        email,
-        estado: "❌ No encontrado",
-        fecha: "",
-        fechaBase,
-        tienda,
-        clientenetsuite,
-        zona,
-        tipo,
-        verificado: false,
-        name: "",
-        cellphone: ""
+        estado: totalCandidatos > 0
+          ? `❌ Candidatos encontrados, pero sin detalle útil (${totalCandidatos})`
+          : "❌ No encontrado",
+        fecha: ""
       };
     }
 
-    const cliente = data.list[0];
     const name = cliente.name || "";
     const cellphone = cliente.cellphone || "";
-    const tags = Array.isArray(cliente.tags) ? cliente.tags : [];
 
-    const tag119 = tags.find(t => t.tag === 119);
-    const tag207 = tags.find(t => t.tag === 207);
+    const tag119 = buscarTag(cliente, TAG_COMPLETO);
+    const tag207 = buscarTag(cliente, TAG_PIN_VALIDATED);
 
-    // EXTRAER FECHAS
-    let fechaTag119 = "";
-    if (tag119?.createdAt) {
-      fechaTag119 = typeof tag119.createdAt === "string"
-        ? tag119.createdAt.split("T")[0]
-        : tag119.createdAt.date?.split(" ")[0] || "";
+    const fechaTag119 = normalizarFechaGuper(tag119?.createdAt);
+    const fechaTag207 = normalizarFechaGuper(tag207?.createdAt);
+    const fechaRegistro = normalizarFechaGuper(cliente.createdAt);
+
+    const verificado = fechaTag207 === fechaEsperada;
+
+    const debugGuper = `Guper ID ${cliente.id || "N/A"} | candidatos ${totalCandidatos} | detalles ${detallesConsultados}`;
+
+    if (erroresDetalle.length) {
+      console.warn(`⚠️ Algunos detalles Guper fallaron para ${email}:`, erroresDetalle);
     }
-
-    let fechaTag207 = "";
-    if (tag207?.createdAt) {
-      fechaTag207 = typeof tag207.createdAt === "string"
-        ? tag207.createdAt.split("T")[0]
-        : tag207.createdAt.date?.split(" ")[0] || "";
-    }
-
-    let fechaRegistro = "";
-    if (cliente.createdAt) {
-      fechaRegistro = typeof cliente.createdAt === "string"
-        ? cliente.createdAt.split("T")[0]
-        : cliente.createdAt.date?.split(" ")[0] || "";
-    }
-
-    const verificado = (fechaTag207 === fechaEsperada); 
 
     // CLASIFICACIÓN
     if (fechaTag119 === fechaEsperada && fechaRegistro === fechaEsperada) {
       return {
+        ...baseResultado,
         categoria: "Registrados",
-        folio,
-        email,
-        estado: "✅ Registro Nuevo",
+        estado: `✅ Registro Nuevo (${debugGuper})`,
         fecha: fechaTag119,
-        fechaBase,
-        tienda,
-        clientenetsuite,
-        zona,
-        tipo,
-        verificado,
-        name,
-        cellphone,
-        staff: sellerName
-      };
-    } else if (fechaTag119 === fechaEsperada) {
-      return {
-        categoria: "Registrados",
-        folio,
-        email,
-        estado: "📝 Actualizado",
-        fecha: fechaTag119,
-        fechaBase,
-        tienda,
-        clientenetsuite,
-        zona,
-        tipo,
         verificado,
         name,
         cellphone
       };
-    } else if (tag119) {
+
+    } else if (fechaTag119 === fechaEsperada) {
       return {
-        categoria: "Recompras",
-        folio,
-        email,
-        estado: "⚠️ Registro Previo",
+        ...baseResultado,
+        categoria: "Registrados",
+        estado: `📝 Actualizado (${debugGuper})`,
         fecha: fechaTag119,
-        fechaBase,
-        tienda,
-        clientenetsuite,
-        zona,
-        tipo,
         verificado,
         name,
-        cellphone,
-        staff: sellerName
-
+        cellphone
       };
+
+    } else if (tag119) {
+      return {
+        ...baseResultado,
+        categoria: "Recompras",
+        estado: `⚠️ Registro Previo (${debugGuper})`,
+        fecha: fechaTag119,
+        verificado,
+        name,
+        cellphone
+      };
+
     } else {
       return {
+        ...baseResultado,
         categoria: "Ticket Válido",
-        folio,
-        email,
-        estado: "⛔ Sin Tag 119",
+        estado: `⛔ Sin Tag ${TAG_COMPLETO} (${debugGuper})`,
         fecha: "",
-        fechaBase,
-        tienda,
-        clientenetsuite,
-        zona,
-        tipo,
         verificado,
         name,
         cellphone
@@ -286,23 +475,13 @@ async function verificarTagYClasificar(email, folio, fechaEsperada, tienda, clie
 
   } catch (error) {
     return {
+      ...baseResultado,
       categoria: "Ticket Válido",
-      folio,
-      email,
       estado: `⚠️ Error: ${error.message}`,
-      fecha: "",
-      fechaBase,
-      tienda,
-      clientenetsuite,
-      zona,
-      tipo,
-      verificado: false,
-      name: "",
-      cellphone: ""
+      fecha: ""
     };
   }
 }
-
 // ----------------------------------------------------------------------
 // Función para deduplicar por correo
 // ----------------------------------------------------------------------
@@ -709,19 +888,15 @@ function saveResumenCsv(tiendaArray, startDate) {
 // MAIN
 // ----------------------------------------------------------------------
 async function main() {
-  let inputDate = process.argv[2];
-  if (!inputDate) {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    inputDate = yesterday.toISOString().split('T')[0];
-    console.log(`📅 No se proporcionó fecha. Usando fecha de ayer: ${inputDate}`);
-  }
+  const inputDate = process.argv[2];
+  if (!inputDate) return console.log("📅 Debes pasar la fecha: node metricasDi.js YYYY-MM-DD");
 
-  const startDate = inputDate;
+  const startDate = new Date(inputDate).toISOString().split('T')[0];
   console.log(`🔍 Obteniendo órdenes del ${startDate}...\n`);
 
   let mysqlConn;
   try {
+    // 1) CONEXIÓN SOLO PARA CREAR TABLAS + GUARDAR ORDERS
     mysqlConn = await mysql.createConnection(mysqlConfig);
     console.log("✅ Conectado a MySQL (fase ORDERS). threadId:", mysqlConn.threadId);
     await createTablesMySQL(mysqlConn);
@@ -738,17 +913,16 @@ async function main() {
 
     const ordersHeader = "Folio,Email,Created_Date,Tienda,clientenetsuite";
     const ordersLines = orders.map(o => `${o.folio},${o.email},${o.created_date},${o.tienda},${o.clientenetsuite}`);
-    const metricaDir = path.join(__dirname, '../metrica');
-    if (!fs.existsSync(metricaDir)) fs.mkdirSync(metricaDir, { recursive: true });
-    
-    const ordersCsvPath = path.join(metricaDir, `orders_${startDate}.csv`);
+    const ordersCsvPath = path.join(__dirname, `../metrica/orders_${startDate}.csv`);
     fs.writeFileSync(ordersCsvPath, [ordersHeader, ...ordersLines].join("\n"), "utf-8");
     console.log(`\n📄 CSV de órdenes generado: ${ordersCsvPath}`);
 
+    // 🔒 CERRAMOS CONEXIÓN ANTES DE EMPEZAR CON GUPER
     await mysqlConn.end();
-    console.log("🔒 Conexión a MySQL cerrada tras orders_netsuite.");
+    console.log("🔒 Conexión a MySQL cerrada tras orders_netsuite (evitar timeout durante Guper).");
     mysqlConn = null;
 
+    // 2) CLASIFICACIÓN + GUPER + ARMADO DE RESULTADOS (SIN MYSQL)
     const resultados = [];
     console.log("🔎 Clasificando órdenes y consultando Guper...");
     for (const order of orders) {
@@ -785,7 +959,7 @@ async function main() {
       [f.Nombre, f.Folio, f.Telefono, f.Email, f.FechaOrden, f.Tienda, f.Staff].join(",")
     );
     
-    const verificadosCsvPath = path.join(metricaDir, `verificados_${startDate}.csv`);
+    const verificadosCsvPath = path.join(__dirname, `../metrica/verificados_${startDate}.csv`);
     fs.writeFileSync(verificadosCsvPath, [header, ...lineas].join("\n"), "utf-8");
     console.log(`✅ CSV de verificados generado: ${verificadosCsvPath}`);
 
@@ -800,6 +974,7 @@ async function main() {
     console.log(`🔁 Recompras (deduplicadas): ${recompras.length}`);
     console.log(`🎫 Tickets Válidos (deduplicados): ${ticketsValidos.length}`);
 
+    // 3) REABRIMOS CONEXIÓN SOLO PARA INSERTAR MÉTRICAS
     mysqlConn = await mysql.createConnection(mysqlConfig);
     console.log("🔁 Conectado a MySQL (fase MÉTRICAS). threadId:", mysqlConn.threadId);
 
@@ -825,14 +1000,16 @@ async function main() {
 
     const saveCsv = (arr, nombre, header) => {
       const sorted = ordenar(arr);
+      const headerCols = header.split(",").length;
       const lines = [header].concat(sorted.map(r => {
         let base = [
           r.categoria, r.folio, r.email, r.estado, r.fecha, r.fechaBase,
-          r.tienda, r.clientenetsuite, r.zona, r.tipo, r.verificado ? "Sí" : "No"
+          r.tienda, r.clientenetsuite, r.zona, r.tipo
         ];
+        if (headerCols === 11) base.push(r.verificado ? "Sí" : "No");
         return base.join(",");
       }));
-      const outPath = path.join(metricaDir, `${nombre}_${startDate}.csv`);
+      const outPath = path.join(__dirname, `../metrica/${nombre}_${startDate}.csv`);
       fs.writeFileSync(outPath, lines.join("\n"), "utf-8");
       console.log(`📤 CSV ${nombre} generado: ${outPath}`);
     };
@@ -842,18 +1019,61 @@ async function main() {
     saveCsv(unionTicketsValidos, "tickets_validos", headerRegistrados);
     saveCsv(resultadosDeduplicados, "categorizados", headerRegistrados);
 
+    // Excel final (solo disco, no MySQL)
     const workbook = new ExcelJS.Workbook();
+
     const sheetConv = workbook.addWorksheet('Conversion_Tienda');
     const convHeader = "Tienda,Orders,Registrados,Tickets Válidos,Recompras,Conversion (%),Tasa Recompras (%),Verificados,% Verificados,FechaBase";
     sheetConv.addRow(convHeader.split(","));
     tiendaArray.forEach(obj => {
       sheetConv.addRow([
-        obj.tienda, obj.orders, obj.registrados, obj.ticketsValidos, obj.recompras,
-        obj.conversion, obj.tasaRecompras, obj.verificados, obj.porcentajeVerificados, obj.fechabase
+        obj.tienda,
+        obj.orders,
+        obj.registrados,
+        obj.ticketsValidos,
+        obj.recompras,
+        obj.conversion,
+        obj.tasaRecompras,
+        obj.verificados,
+        obj.porcentajeVerificados,
+        obj.fechabase
       ]);
     });
 
-    const excelPath = path.join(metricaDir, `reporte_metricas_${startDate}.xlsx`);
+    const sheetReg = workbook.addWorksheet('Registrados');
+    sheetReg.addRow(headerRegistrados.split(","));
+    ordenar(registrados).forEach(r => {
+      sheetReg.addRow([
+        r.categoria, r.folio, r.email, r.estado, r.fecha, r.fechaBase,
+        r.tienda, r.clientenetsuite, r.zona, r.tipo, r.verificado ? "Sí" : "No"
+      ]);
+    });
+
+    const sheetRec = workbook.addWorksheet('Recompras');
+    sheetRec.addRow(headerRegistrados.split(","));
+    ordenar(recompras).forEach(r => {
+      sheetRec.addRow([
+        r.categoria, r.folio, r.email, r.estado, r.fecha, r.fechaBase,
+        r.tienda, r.clientenetsuite, r.zona, r.tipo, r.verificado ? "Sí" : "No"
+      ]);
+    });
+
+    const sheetTV = workbook.addWorksheet('Tickets_Validos');
+    sheetTV.addRow(headerRegistrados.split(","));
+    ordenar(unionTicketsValidos).forEach(r => {
+      sheetTV.addRow([
+        r.categoria, r.folio, r.email, r.estado, r.fecha, r.fechaBase,
+        r.tienda, r.clientenetsuite, r.zona, r.tipo, r.verificado ? "Sí" : "No"
+      ]);
+    });
+
+    const sheetTrans = workbook.addWorksheet('Transacciones_Netsuite');
+    sheetTrans.addRow("Folio,Email,Created_Date,Tienda,clientenetsuite".split(","));
+    orders.forEach(o => {
+      sheetTrans.addRow([o.folio, o.email, o.created_date, o.tienda, o.clientenetsuite]);
+    });
+
+    const excelPath = path.join(__dirname, `../metrica/reporte_metricas_${startDate}.xlsx`);
     await workbook.xlsx.writeFile(excelPath);
     console.log(`\n📄 Archivo Excel consolidado generado: ${excelPath}`);
 
