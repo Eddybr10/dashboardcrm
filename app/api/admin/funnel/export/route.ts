@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
         
         const guperResults = await Promise.all(
           batch.map(async (email) => {
-            const profile = await getGuperCustomerByEmail(email.trim());
+            const profile = await getGuperCustomerByEmail(email.trim(), fin);
             if (profile) {
               const tags = Array.isArray(profile.tags) ? profile.tags : [];
               const hasTag119 = tags.some((t: any) => t.tag === 119);

@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
         if (emailsToFetch.length > 0) {
           const guperResults = await Promise.all(
             emailsToFetch.map(async (email) => {
-              const profile = await getGuperCustomerByEmail(email.trim());
+              const profile = await getGuperCustomerByEmail(email.trim(), fin);
               if (profile) {
                 const tags = Array.isArray(profile.tags) ? profile.tags : [];
                 const hasTag119 = tags.some((t: any) => t.tag === 119);

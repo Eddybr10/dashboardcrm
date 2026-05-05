@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
         rfm_totalPurchaseValue: guperProfile.rfm?.totalPurchaseValue,
         rfm_totalPurchases: guperProfile.rfm?.totalPurchases,
         rfm_daysWithoutPurchase: guperProfile.rfm?.daysWithoutPurchase,
-        tags: guperProfile.tags?.map((t: any) => t.tag).join(', ')
+        tags: guperProfile.tags?.map((t: any) => t.tag || t.id || t.tagId).join(', ')
       };
       source = 'guper_api';
     }

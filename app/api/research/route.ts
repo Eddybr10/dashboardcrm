@@ -1,20 +1,11 @@
 import { NextResponse } from 'next/server';
 import { queryMysql } from '@/lib/mysql';
+import { getGuperCustomerByEmail } from '@/lib/guper';
 
 export async function GET() {
-  const GUPER_BASE_URL = process.env.GUPER_BASE_URL;
-  const GUPER_TOKEN = process.env.GUPER_TOKEN;
   const email = 'eddy201222@hotmail.com';
-  const url = `${GUPER_BASE_URL}/register/customer?q[email]=${encodeURIComponent(email)}`;
-
-  const resGuper = await fetch(url, {
-    headers: {
-      "x-guper-authorization": `Bearer ${GUPER_TOKEN}`,
-      "Content-Type": "application/json",
-    }
-  });
-  const guperStatus = resGuper.status;
-  const guperData = await resGuper.json();
+  const guperData = await getGuperCustomerByEmail(email);
+  const guperStatus = guperData ? 200 : 404;
 
   const rows = await queryMysql('SELECT * FROM ordenes_enriquecidas LIMIT 1');
   const columns = Array.isArray(rows) && rows.length > 0 ? Object.keys(rows[0] as object) : [];
