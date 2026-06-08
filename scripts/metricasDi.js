@@ -879,7 +879,7 @@ function saveResumenCsv(tiendaArray, startDate) {
   const convLines = tiendaArray.map(obj =>
     `${obj.tienda},${obj.orders},${obj.registrados},${obj.ticketsValidos},${obj.recompras},${obj.conversion},${obj.tasaRecompras},${obj.verificados},${obj.porcentajeVerificados},${obj.fechabase}`
   );
-  const convPath = path.join(__dirname, `/metrica/conversion_por_tienda_${startDate}.csv`);
+  const convPath = path.join(__dirname, `../metrica/conversion_por_tienda_${startDate}.csv`);
   fs.writeFileSync(convPath, [convHeader, ...convLines].join("\n"), "utf-8");
   console.log(`\n📊 CSV de conversión por tienda generado: ${convPath}`);
 }
@@ -902,7 +902,7 @@ async function guardarExcel(startDate, sheetsData) {
     agregarHoja(sheet.sheetName, sheet.header, sheet.data);
   }
   
-  const excelPath = path.join(__dirname, `/metrica/reporte_metricas_${startDate}.xlsx`);
+  const excelPath = path.join(__dirname, `../metrica/reporte_metricas_${startDate}.xlsx`);
   await workbook.xlsx.writeFile(excelPath);
   console.log(`\n📄 Archivo Excel consolidado generado: ${excelPath}`);
 }
@@ -939,7 +939,7 @@ async function main() {
 
     const ordersHeader = "Folio,Email,Created_Date,Tienda,clientenetsuite";
     const ordersLines = orders.map(o => `${o.folio},${o.email},${o.created_date},${o.tienda},${o.clientenetsuite}`);
-    const ordersCsvPath = path.join(__dirname, `/metrica/orders_${startDate}.csv`);
+    const ordersCsvPath = path.join(__dirname, `../metrica/orders_${startDate}.csv`);
     fs.writeFileSync(ordersCsvPath, [ordersHeader, ...ordersLines].join("\n"), "utf-8");
     console.log(`\n📄 CSV de órdenes generado: ${ordersCsvPath}`);
 
@@ -985,7 +985,7 @@ async function main() {
       [f.Nombre, f.Folio, f.Telefono, f.Email, f.FechaOrden, f.Tienda, f.Staff].join(",")
     );
     
-    const verificadosCsvPath = path.join(__dirname, `/metrica/verificados_${startDate}.csv`);
+    const verificadosCsvPath = path.join(__dirname, `../metrica/verificados_${startDate}.csv`);
     fs.writeFileSync(verificadosCsvPath, [header, ...lineas].join("\n"), "utf-8");
     console.log(`✅ CSV de verificados generado: ${verificadosCsvPath}`);
 
@@ -1035,7 +1035,7 @@ async function main() {
         if (headerCols === 11) base.push(r.verificado ? "Sí" : "No");
         return base.join(",");
       }));
-      const outPath = path.join(__dirname, `/metrica/${nombre}_${startDate}.csv`);
+      const outPath = path.join(__dirname, `../metrica/${nombre}_${startDate}.csv`);
       fs.writeFileSync(outPath, lines.join("\n"), "utf-8");
       console.log(`📤 CSV ${nombre} generado: ${outPath}`);
     };
@@ -1099,7 +1099,7 @@ async function main() {
       sheetTrans.addRow([o.folio, o.email, o.created_date, o.tienda, o.clientenetsuite]);
     });
 
-    const excelPath = path.join(__dirname, `/metrica/reporte_metricas_${startDate}.xlsx`);
+    const excelPath = path.join(__dirname, `../metrica/reporte_metricas_${startDate}.xlsx`);
     await workbook.xlsx.writeFile(excelPath);
     console.log(`\n📄 Archivo Excel consolidado generado: ${excelPath}`);
 
