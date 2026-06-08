@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
             const profile = await getGuperCustomerByEmail(email.trim(), fin);
             if (profile) {
               const tags = Array.isArray(profile.tags) ? profile.tags : [];
-              const hasTag119 = tags.some((t: any) => t.tag === 119);
+              const hasTag119 = tags.some((t: any) => String(t?.tag ?? t?.id ?? t?.tagId ?? "").trim() === "119");
 
               return {
                 originalQuery: email,

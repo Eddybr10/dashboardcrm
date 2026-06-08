@@ -27,8 +27,8 @@ function scoreClienteGuper(cliente: any, fechaEsperada?: string) {
   // Helper to get tag id/name
   const getTagId = (t: any) => String(t?.tag ?? t?.id ?? t?.tagId ?? "").trim();
   
-  const tag119 = tags.find(t => getTagId(t) === TAG_COMPLETO);
-  const tag207 = tags.find(t => getTagId(t) === TAG_PIN_VALIDATED);
+  const tag119 = tags.find((t: any) => getTagId(t) === TAG_COMPLETO);
+  const tag207 = tags.find((t: any) => getTagId(t) === TAG_PIN_VALIDATED);
 
   let score = 0;
 
